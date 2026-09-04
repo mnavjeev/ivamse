@@ -1,0 +1,7 @@
+checkdir/
+*.Rcheck/
+*.tar.gz
+.Rproj.user/
+.Rhistory
+scratch/
+Rplots.pdf

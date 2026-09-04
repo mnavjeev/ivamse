@@ -1,0 +1,43 @@
+Package: ivamse
+Type: Package
+Title: IV-LASSO with Approximate-MSE Selection of the Dictionary and Penalty
+Version: 0.1.0
+Date: 2026-09-04
+Authors@R: c(
+    person("Yukun", "Ma", role = "aut"),
+    person("Manu", "Navjeevan", email = "mnavjeevan@tamu.edu", role = c("aut", "cre")),
+    person("Bohdan", "Salahub", role = "aut"))
+Description: Instrumental variable estimation for linear models in which the
+    first stage is fitted by the LASSO, and the dictionary of technical
+    instruments and the penalty level are chosen by minimizing a feasible
+    estimate of the approximate mean squared error (AMSE) of the resulting
+    estimator of the structural coefficient, following Ma, Navjeevan and
+    Salahub. First-order asymptotics do not distinguish candidate first stages,
+    so the criterion works with second-order terms, trading first-stage
+    approximation error against a many-instrument bias whose weight rises with
+    the endogeneity of the regressor. The main ivamse() model-fitting function
+    provides a formula interface as similar as possible to that of the 'ivreg'
+    package, including included exogenous controls, which are partialled out. A
+    range of methods is provided for fitted model objects, and 'bread' and
+    'estfun' methods make heteroscedasticity-consistent and cluster-robust
+    covariances from the 'sandwich' package directly available.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 3.6.0)
+Imports:
+    Formula,
+    glmnet,
+    grDevices,
+    graphics,
+    stats
+Suggests:
+    broom,
+    ivreg,
+    knitr,
+    lmtest,
+    rmarkdown,
+    sandwich,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+RoxygenNote: 7.2.2
+VignetteBuilder: knitr

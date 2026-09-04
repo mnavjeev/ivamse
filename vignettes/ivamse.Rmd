@@ -1,0 +1,237 @@
+---
+title: "ivamse: Choosing the Dictionary and Penalty for IV-LASSO"
+author: "Yukun Ma, Manu Navjeevan, Bohdan Salahub"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{ivamse: Choosing the Dictionary and Penalty for IV-LASSO}
+  %\VignetteDepends{ivamse}
+  %\VignetteKeywords{instrumental variables, lasso, model selection}
+  %\VignettePackage{ivamse}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r preliminaries, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 3.6, dpi = 110)
+set.seed(20260904)
+```
+
+## Overview
+
+Consider estimating
+
+$$y_i = \beta x_i + w_i'\gamma + \varepsilon_i, \qquad x_i = \Pi_i + v_i,$$
+
+where $x_i$ is endogenous, $w_i$ collects included exogenous controls, and many
+instruments are available. Fitting the first stage by the lasso requires two
+choices: which dictionary of technical instruments to use, and how heavily to
+penalize.
+
+First-order asymptotics do not distinguish the candidates, however, since every
+sufficiently good first stage gives
+
+$$\sqrt{n}(\hat\beta - \beta) = \frac{\sqrt{n}\,\mathbb{E}_n[\Pi_i\varepsilon_i]}{H} + o_p(1),$$
+
+whose leading term does not involve the first-stage estimate. Separating the
+candidates therefore requires the terms that this expansion discards. The
+criterion implemented in `ivamse()` estimates those terms and ranks the
+candidates by them.
+
+```{r setup}
+library("ivamse")
+```
+
+## Illustration: A sparse first stage
+
+The four leading instruments enter the first stage, the remaining fifty-six do
+not, and the structural and first-stage errors are correlated, so the regressor
+is endogenous.
+
+```{r data}
+make_data <- function(N = 800, p = 60, rho = 0.7) {
+  z <- matrix(rnorm(N * p), N, p)
+  colnames(z) <- paste0("z", seq_len(p))
+  v <- rnorm(N)
+  e <- rho * v + sqrt(1 - rho^2) * rnorm(N)
+  w <- rnorm(N)
+  x <- z[, 1] + 0.8 * z[, 2] + 0.6 * z[, 3] + 0.4 * z[, 4] + w + v
+  y <- 2 * x + w + e
+  data.frame(y, x, w, firm = factor(rep_len(1:80, N)), z)
+}
+
+d <- make_data()
+instruments <- reformulate(paste0("z", 1:60))
+```
+
+The true coefficient on `x` is 2. Ordinary least squares ignores the
+correlation between the two errors:
+
+```{r ols}
+m_ols <- lm(y ~ x + w, data = d)
+coef(m_ols)["x"]
+```
+
+Thus, OLS yields an estimate of `r round(coef(m_ols)["x"], 3)`.
+
+## Fitting the model
+
+The model formula has three parts on the right-hand side, giving the exogenous
+regressors, the endogenous regressor, and the excluded instruments. When
+`dictionaries` is supplied, as it is here, the third part is ignored and the
+dictionaries take its place.
+
+```{r fit}
+m_iv <- ivamse(y ~ w | x | z1, dictionaries = list(all = instruments), data = d)
+summary(m_iv)
+```
+
+The summary reports the selected dictionary and penalty, the effective
+dimension of the corresponding first stage, and the two estimated error
+moments. The implied correlation is attenuated relative to the `rho` of the
+design, because it is computed from a preliminary estimate of $\beta$ rather
+than from the truth; Ma, Navjeevan and Salahub analyze the effect of that
+preliminary estimate on the criterion.
+
+## The candidate grid
+
+`plot()` shows the criterion and the effective dimension across the penalty
+grid, with the selected candidate marked.
+
+```{r plot}
+plot(m_iv)
+```
+
+The same information is held in the candidate table. The multiplier `kappa`
+expresses each penalty as a fraction of the plug-in penalty of Belloni, Chen,
+Chernozhukov and Hansen, and `implied_alpha` is positive for those candidates
+that satisfy the penalty condition of Ma, Navjeevan and Salahub.
+
+```{r candidates}
+cand <- m_iv$candidates
+cand[seq(1, nrow(cand), by = 4),
+     c("lambda", "kappa", "h", "d", "criterion", "implied_alpha")]
+```
+
+`selected()` reports which instruments the chosen first stage uses.
+
+```{r selected}
+selected(m_iv)$instruments
+```
+
+## Endogeneity and the selected dimension
+
+The bias term of the criterion is weighted by the squared covariance of the two
+errors, so a more endogenous regressor should be met with heavier
+regularization and a simpler first stage. The specification is identical in
+every row below; only `rho` and the draw of the data change.
+
+```{r endogeneity}
+sweep_rho <- function(rho) {
+  fit <- ivamse(y ~ w | x | z1, dictionaries = list(all = instruments),
+                data = make_data(rho = rho))
+  c(rho = rho, estimate = unname(coef(fit)[1]), dimension = fit$selected$d)
+}
+t(sapply(c(0.1, 0.4, 0.7, 0.9), sweep_rho))
+```
+
+The effective dimension falls sharply as the correlation rises, in the
+direction the criterion predicts. A single draw at each correlation is an
+illustration rather than evidence; Ma, Navjeevan and Salahub report the
+corresponding Monte Carlo study.
+
+## Selection rules
+
+Cross-validation ranks candidates by first-stage fit alone, and the plug-in rule
+targets a penalty that dominates first-stage noise. Neither uses the outcome
+equation, so neither responds to the endogeneity of the regressor.
+
+```{r rules}
+compare <- function(rule) {
+  fit <- ivamse(y ~ w | x | z1, dictionaries = list(all = instruments),
+                select = rule, data = d)
+  c(estimate = unname(coef(fit)[1]), dimension = fit$selected$d)
+}
+data.frame(rule = c("amse", "cv", "bcch"),
+           t(sapply(c("amse", "cv", "bcch"), compare)))
+```
+
+Cross-validation selects a considerably richer first stage than the criterion
+does at this correlation.
+
+## Several dictionaries
+
+Ma, Navjeevan and Salahub select over the dictionary as well as the penalty.
+A named list of one-sided formulas supplies the candidate dictionaries, and the
+criterion is on a common scale, so candidates from different dictionaries are
+directly comparable.
+
+```{r dictionaries}
+m_dict <- ivamse(
+  y ~ w | x | z1,
+  dictionaries = list(
+    small  = ~ z1 + z2 + z3,
+    medium = ~ z1 + z2 + z3 + z4 + z5 + z6 + z7 + z8,
+    wide   = ~ (z1 + z2 + z3 + z4) * (z5 + z6 + z7 + z8)
+  ),
+  data = d
+)
+m_dict$selected$dictionary
+plot(m_dict)
+```
+
+Ties are broken toward the earlier candidate, so the order of the list matters
+and the simpler dictionaries should be listed first.
+
+## Controls and clustered standard errors
+
+Included exogenous controls enter both equations and are partialled out. They
+are never penalized, and the effective sample size becomes $n = N - q$, where
+$q$ is the rank of the controls.
+
+Clustering affects the reported standard errors only. Selection always uses the
+homoscedastic criterion, since that is what the theory covers.
+
+```{r cluster}
+m_cl <- ivamse(y ~ w | x | z1, dictionaries = list(all = instruments),
+               cluster = ~ firm, data = d)
+confint(m_cl)
+```
+
+Because `bread()` and `estfun()` methods are provided, the variance estimators
+of the **sandwich** package apply directly:
+
+```{r sandwich, eval = requireNamespace("sandwich", quietly = TRUE)}
+sqrt(diag(sandwich::vcovHC(m_cl, type = "HC1")))
+```
+
+## Limitations
+
+The model may contain only one endogenous regressor; the theory does not cover
+a vector $x_i$.
+
+The criterion contains an offset common to every candidate, so its level is not
+an estimate of mean squared error and only differences across candidates are
+meaningful.
+
+Standard errors treat the selected first stage as fixed. They account for
+neither first-stage estimation error nor the selection step, and they are not
+valid under weak identification.
+
+The criterion is derived under homoscedastic Gaussian errors. Simulations with
+Laplace errors leave the ranking of candidates essentially unchanged, but
+heteroscedastic selection is not covered by any result.
+
+## References
+
+Belloni, A., Chen, D., Chernozhukov, V., and Hansen, C. (2012). Sparse models
+and methods for optimal instruments with an application to eminent domain.
+*Econometrica* **80**, 2369--2429.
+
+Donald, S. G., and Newey, W. K. (2001). Choosing the number of instruments.
+*Econometrica* **69**, 1161--1191.
+
+Ma, Y., Navjeevan, M., and Salahub, B. Choosing the dictionary and penalty for
+IV-LASSO.
