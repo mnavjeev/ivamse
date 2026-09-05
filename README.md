@@ -2,18 +2,20 @@
 
 ## Overview
 
-**ivamse** fits linear instrumental-variables models with one endogenous
-regressor and a LASSO first stage. It chooses the instrument dictionary and
-LASSO penalty using the approximate mean squared error (AMSE) criterion of
+**ivamse** implements the approximate mean squared error (AMSE) criterion of
 Ma, Navjeevan and Salahub, *Choosing the Dictionary and Penalty for IV-LASSO*.
-The aim is to choose a first stage that gives a precise estimate of the
-structural coefficient.
+We consider linear instrumental variables models with one endogenous regressor
+in which the first stage is estimated using the LASSO. Estimation in these
+models requires choosing both a dictionary of technical instruments and a
+penalty level. The package selects these jointly to minimize a feasible AMSE
+criterion for the coefficient on the endogenous regressor.
 
-First-order asymptotics offer no guidance on these choices: first stages that
-consistently estimate the optimal instrument give the structural estimator the
-same limiting distribution. The AMSE criterion uses higher-order terms to
-compare them. For a candidate `c`, meaning one dictionary paired with one
-penalty, the score is
+When candidate first stages consistently estimate the optimal instrument, the
+corresponding structural estimators have the same first-order limiting
+distribution. This limits the usefulness of first-order asymptotics for choosing
+among them. The proposed criterion uses higher-order terms that account for
+first-stage approximation error and many-instrument bias. For each candidate
+`c`, consisting of a dictionary and a penalty level, we evaluate
 
 ```
 S_c = ( sigma_eps^2 * E_n[Pi_hat_c^2]  +  sigma_epsv^2 * (d_c^2 + d_c) / n ) / h_c^2
@@ -22,22 +24,26 @@ S_c = ( sigma_eps^2 * E_n[Pi_hat_c^2]  +  sigma_epsv^2 * (d_c^2 + d_c) / n ) / h
 where `Pi_hat_c` is the fitted first stage, `h_c = E_n[Pi_hat_c * x]` is the IV
 denominator, `d_c` is the effective dimension of the LASSO fit, and `n` is the
 effective sample size. After division by `h_c^2`, the first term measures
-first-stage approximation error up to an offset common to all candidates. The
-second accounts for many-instrument bias of the kind studied by Donald and
-Newey (2001). Its weight is the squared covariance `sigma_epsv^2` of the
-structural and first-stage errors. Greater endogeneity therefore puts more
-weight on the cost of a complex first stage. Cross-validation uses first-stage
-prediction error, while the plug-in penalty of Belloni, Chen, Chernozhukov and
-Hansen (2012) is calibrated to dominate the first-stage score. Neither uses
-this estimate of endogeneity.
+first-stage approximation error up to a common offset. The second captures
+many-instrument bias as studied by Donald and Newey (2001). The weight on this
+bias depends on the squared covariance `sigma_epsv^2` between the structural
+and first-stage errors. In particular, greater endogeneity increases the cost
+of a larger effective dimension in the criterion.
 
-Use `ivamse()` with a formula or `ivamse_fit()` with design matrices. Both
-return an `"ivamse"` object with methods such as `summary()`, `coef()`,
-`confint()` and `predict()`. The `selected()` method reports the chosen
-dictionary, penalty and first-stage coefficients. Fits also work with
+The package also implements selection by cross-validation and by the plug-in
+penalty of Belloni, Chen, Chernozhukov and Hansen (2012). Cross-validation
+minimizes first-stage prediction error, and the plug-in penalty is calibrated
+to dominate the first-stage score. These procedures do not use the outcome and
+therefore do not account for the estimated endogeneity of the regressor.
+
+The main function, `ivamse()`, accepts a model formula. The matrix interface is
+provided by `ivamse_fit()`. Both return an `"ivamse"` object with methods such
+as `summary()`, `coef()`, `confint()` and `predict()`. The `selected()` method
+reports the chosen dictionary, penalty and first-stage coefficients. Methods
+are also provided for
 [**sandwich**](https://CRAN.R-project.org/package=sandwich) covariance estimators
-and [**broom**](https://CRAN.R-project.org/package=broom) tidiers; the full method
-list is below.
+and [**broom**](https://CRAN.R-project.org/package=broom) tidiers. These methods
+are described below.
 
 ## Installation
 
@@ -89,17 +95,18 @@ For each candidate the first stage solves
 minimize  (1/(2n)) * ||x - Z pi||^2  +  lambda * ||pi||_1
 ```
 
-and the LASSO fitted values themselves, rather than a refit on the selected
-support, serve as the single excluded instrument in a just-identified IV
-regression of `y` on `(x, w)`.
+and the resulting fitted values serve as the single excluded instrument in a
+just-identified IV regression of `y` on `(x, w)`. The first stage uses the LASSO
+coefficients without a least-squares refit on the selected support.
+
 The effective dimension `d_c` is the rank of the dictionary columns in the
-equicorrelation set, the columns whose score against the LASSO residual attains
-the penalty. Counting nonzero coefficients would not do, since with collinear
-columns the coefficient vector is not unique and two solvers can report different
-supports for the same fit; the equicorrelation set is a function of the fitted
-values, which are unique. For a dictionary with full column rank, the solution
-is unique and the effective dimension is generically the number of selected
-columns. The code uses this shortcut when it applies.
+equicorrelation set, defined by the columns whose score against the LASSO
+residual attains the penalty. With collinear columns, the LASSO coefficients
+need not be unique, so the number of nonzero coefficients can depend on the
+solver. The equicorrelation set depends only on the fitted values, which are
+unique. When the dictionary has full column rank, the solution is unique and
+the effective dimension is generically equal to the number of selected columns.
+The package uses this equality to simplify the calculation in that case.
 
 ### Model specification
 
@@ -129,8 +136,8 @@ All parts of the formula, together with `cluster` and `cv_group`, are assembled
 into a single model frame, so `subset`, `na.action` and `contrasts` apply
 uniformly to every variable in the fit. The arguments `x_name`, `intercept`,
 `cluster`, `w` and `z` of `ivamse_fit()` are determined by the formula and cannot
-be set through `ivamse()`; use `ivamse_fit()` when direct control over the
-matrices is wanted.
+be passed as additional matrix-interface arguments through `ivamse()`.
+For direct specification of the design matrices, use `ivamse_fit()`.
 
 ### Dictionaries
 
@@ -160,22 +167,23 @@ increasing penalty within each dictionary. Ties go to the earlier candidate,
 so list simpler dictionaries first. For a matrix specification, pass a named
 list of matrices to the `z` argument of `ivamse_fit()`.
 
-A dictionary column that is numerically collinear with the endogenous regressor
-makes the first stage trivially perfect and the IV estimate meaningless, so it is
-refused. This happens most easily by writing a `.` on the instrument side of a
-formula.
+The package rejects dictionary columns that are numerically collinear with the
+endogenous regressor, since such a column would reproduce the regressor in the
+first stage. This can occur when `.` is used on the instrument side of a formula.
 
 ## Illustration: Returns to schooling
 
-The data are the extract from the U.S. National Longitudinal Survey of Young Men
-used by Card (1995), supplied as `SchoolingReturns` by the **ivreg** package.
-The outcome is the log wage, the endogenous regressor is years of `education`,
-and the controls are `ethnicity`, residence in a metropolitan area (`smsa`),
-residence in the `south`, and a quadratic in `age`. The quadratic in labor-market
-experience of the usual wage equation is replaced by one in age, since experience
-is age minus education minus six and would be a second endogenous regressor,
-which the criterion does not cover. Estimating the wage equation by ordinary
-least squares gives
+We illustrate the procedure by estimating returns to schooling using the data
+of Card (1995), an extract from the U.S. National Longitudinal Survey of Young
+Men available as `SchoolingReturns` in **ivreg**. The outcome is log wage and
+the endogenous regressor is years of `education`. We control for `ethnicity`,
+residence in a metropolitan area (`smsa`), residence in the `south`, and a
+quadratic in `age`.
+
+We use a quadratic in age in place of the usual quadratic in labor-market experience.
+Experience is defined as age minus education minus six and would introduce
+additional endogenous regressors, which the criterion does not cover. As a
+comparison, the ordinary least-squares estimate is
 
 ```r
 m_ols <- lm(log(wage) ~ education + ethnicity + smsa + south + poly(age, 2),
@@ -187,9 +195,9 @@ round(coef(summary(m_ols))["education", ], 4)
     0.0341     0.0027    12.4898     0.0000 
 ```
 
-Education is plausibly endogenous, and Card's instruments are indicators for
-having grown up near a two-year and near a four-year college. Taking those two
-indicators as the dictionary and leaving everything else at its default:
+To account for the possible endogeneity of education, we use indicators for
+having grown up near a two-year or a four-year college as instruments. We first
+take these two indicators as the dictionary and use the default penalty grid:
 
 ```r
 m_iv <- ivamse(
@@ -235,45 +243,42 @@ The selected penalty does not satisfy Assumption 2(iii) (implied alpha -0.842); 
 
 ```
 
-The IV estimate of the return to a year of schooling, 0.12420, is well above the
-least-squares estimate of 0.0341, which is the familiar finding in these data.
+The estimated coefficient on education is 0.12420, compared with 0.0341 under
+least squares. The IV estimate therefore implies a larger return to an
+additional year of schooling in this specification.
 
 ### The coefficient table and the selection block
 
-The coefficient table is ordered with the endogenous coefficient first and the
-controls after it. Standard errors are the homoscedastic ones by default and the
-reference distribution is the normal, so the columns are labeled `z value` and
-`Pr(>|z|)`; passing `df` to `summary()` switches to a t reference with that many
-degrees of freedom. The residual standard error is reported on `N` minus the
-number of estimated coefficients. Controls are partialled out rather than
-penalized, at the cost of the degrees of freedom they use: with 3010 observations
-and 6 control columns the criterion is evaluated at an effective sample size of
-3004.
+The coefficient table reports the endogenous coefficient followed by the
+controls. By default, standard errors assume homoscedasticity and inference uses
+the normal distribution. Passing `df` to `summary()` specifies a t distribution
+with the given degrees of freedom. The residual standard error uses `N` minus
+the number of estimated coefficients. The criterion uses the effective sample
+size after partialling out the controls: in this example, 3010 observations and
+6 control columns give `n = 3004`.
 
-The block below the coefficient table describes the first stage that produced the
-estimate. Only one dictionary was supplied, so it is named `instruments`; the
-chosen penalty is reported both on the scale of the objective and as the multiple
-`kappa` of the plug-in penalty of Belloni et al. for that dictionary, which makes
-it comparable across dictionaries of different widths and is reported whichever
-rule built the grid. Here it is well below one, so the criterion selected a
-penalty lighter than the plug-in level. The effective dimension is one, so the
-selected first stage is a single direction in the two instruments. Of the 25
-candidates on the default grid, 24 are eligible: the grid includes the smallest
-penalty at which every coefficient is zero, whose fit is empty and therefore
-defines no IV estimator.
+The selection block reports the chosen dictionary and penalty. A single
+dictionary is named `instruments` by default. The penalty is reported on the
+scale of the objective and as a multiple `kappa` of the dictionary-specific
+plug-in penalty of Belloni et al. This normalization permits comparison across
+dictionaries of different widths and is reported under each grid specification.
+Here `kappa = 0.0986`, so the selected penalty is substantially below the plug-in
+level. The selected first stage has effective dimension one. Of the 25 grid
+points, 24 are eligible; the remaining penalty sets all coefficients to zero
+and does not define an IV estimator.
 
-The summary reports two first-stage F statistics, and they answer different
-questions. The first is the conventional least-squares F of `education` on the
-reference dictionary, computed after the controls are partialled out; it does not
-use the selected candidate and so is not a post-selection quantity. The second is
-the F on the fitted instrument actually used, which was chosen with `x` in hand
-and is biased upward, and it is printed with that qualification attached.
+The two reported first-stage F statistics differ in how they use the data. The
+first is the least-squares F statistic for `education` on the reference
+dictionary after partialling out the controls. It does not depend on the
+selected candidate. The second uses the fitted instrument, which was selected
+using `x`. This statistic is biased upward and may be misleading as a measure
+of identification strength, as indicated in the printed summary.
 
-The error moments come from the pilot candidate, whose structural estimate
-supplies `sigma_eps^2` and `sigma_epsv`. The implied correlation, here -0.505,
-determines how much weight the criterion places on the many-instrument term; a
-regressor whose endogeneity is mild leaves that term small and the criterion
-close to a fit criterion.
+The pilot structural estimate supplies the error moments `sigma_eps^2` and
+`sigma_epsv`. These moments determine the relative weight on approximation error
+and many-instrument bias. The implied error correlation is -0.505 in this
+example. When the estimated covariance is close to zero, the contribution of
+the bias term is small.
 
 ### Diagnostics
 
@@ -298,10 +303,11 @@ close to a fit criterion.
 
 ### Selecting over dictionaries
 
-We can also compare dictionaries built from the background variables in these
-data. Here `proximity` contains the two college-proximity indicators,
-`background` adds residence in 1966 and family circumstances at age 14, and
-`expanded` interacts the two groups:
+To illustrate joint selection of the dictionary and penalty, we consider three
+dictionaries. The first, `proximity`, contains the two college-proximity
+indicators. The second, `background`, adds residence in 1966 and family
+circumstances at age 14. The third, `expanded`, includes interactions between
+the two groups:
 
 ```r
 dictionaries <- list(
@@ -331,15 +337,14 @@ poly(age, 2)1  poly(age, 2)2
 
 ```
 
-The criterion prefers the interacted dictionary at a light penalty, and the
-estimated return falls to 0.05337. The third formula part, `nearcollege`, is the
-placeholder described above. Setting `pilot = "background"` chooses the pilot
-from the middle dictionary. Its residuals supply the error moments used to
-weight the bias term.
+The criterion selects the interacted dictionary with a penalty of 0.001464,
+giving an estimated return of 0.05337. The third formula part, `nearcollege`,
+serves as a placeholder because `dictionaries` specifies the candidate
+instruments. Setting `pilot = "background"` restricts the pilot to the second
+dictionary. Its residuals supply the error moments used in the criterion.
 
-Every candidate that was scored is kept in the fit, one per row of
-`$candidates`, in the order dictionaries were listed and, within each, by
-increasing penalty:
+The fitted object retains the scores for all candidates in `$candidates`,
+ordered by dictionary and then by increasing penalty:
 
 ```r
 head(m_dict$candidates[, c("dictionary", "lambda", "kappa", "h", "d",
@@ -355,22 +360,20 @@ head(m_dict$candidates[, c("dictionary", "lambda", "kappa", "h", "d",
 6  proximity 1.432775e-04 0.0010334705 0.04470718 3  3.296432    -0.8614779
 ```
 
-`kappa` expresses each penalty as a multiple of the plug-in level whichever rule
-built the grid, so the plug-in penalty can always be located among the
-candidates. The full table adds `p`, the number of columns in the dictionary;
-`column`, the position within it; `fitted_moment`, the second moment of the
-fitted instrument; `nonzero`, the naive dimension; `empty`, marking fits the
-LASSO shrank to zero; `eligible`; `cvm` and `cvsd` when cross-validation was
-computed; and `used`, marking the candidate the reported estimate came from.
-Scores for ineligible candidates are kept in the table for inspection rather than
-overwritten, so the criterion can be examined along the whole grid.
+The `kappa` column expresses each penalty relative to the plug-in level. The
+full table also reports the dictionary width `p`, the candidate's position
+`column` within its dictionary, the fitted instrument's second moment
+`fitted_moment`, and the number of nonzero coefficients `nonzero`. The fields
+`empty`, `eligible` and `used` indicate whether the fit is zero, whether it can
+be selected, and whether it was used for the reported estimate. Cross-validation
+scores appear in `cvm` and `cvsd` when computed. Scores are retained for
+ineligible candidates so that the criterion can be inspected over the full grid.
 
-Two further displays summarize the same information. `selected()` returns the
-chosen candidate, the best candidate within each dictionary, and the nonzero
-first-stage coefficients on the normalized dictionary, largest in absolute value
-first. `plot()` draws two panels in the style of `plot.cv.glmnet()`, the
-criterion and the effective dimension against `log(lambda)`, with one line per
-dictionary and the selected candidate marked:
+The `selected()` method reports the chosen candidate, the best candidate within
+each dictionary, and the nonzero first-stage coefficients on the normalized
+dictionary, ordered by decreasing absolute value. The `plot()` method shows the criterion
+and effective dimension against `log(lambda)`, with a line for each dictionary
+and a marker for the selected candidate:
 
 ```r
 selected(m_dict)
@@ -379,14 +382,15 @@ plot(m_dict)
 
 ## The penalty grid
 
-By default the grid for each dictionary is built as **glmnet** builds one:
-`nlambda = 25` points running geometrically down from `lambda_max`, the smallest
-penalty at which every coefficient is zero, to `lambda.min.ratio * lambda_max`.
+The default grid follows the construction used by **glmnet**, with
+`nlambda = 25` geometrically spaced points between `lambda_max` and
+`lambda.min.ratio * lambda_max`. Here `lambda_max` is the smallest penalty
+that sets every coefficient to zero.
 The ratio defaults to `1e-2` when the dictionary is wider than the effective
 sample size and to `1e-4` otherwise. The default `nlambda` is smaller than
-glmnet's 100 because the theory ranks a fixed and moderate list of candidates
-rather than tracing a path; the grids of Ma et al. have 13 to 29 points per
-dictionary. The package prints a message when the total exceeds 100 candidates.
+glmnet's 100 because the theory considers selection over a fixed, moderate
+number of candidates. The grids of Ma et al. have 13 to 29 points per dictionary.
+The package prints a message when the total exceeds 100 candidates.
 
 | argument | effect |
 | --- | --- |
@@ -452,7 +456,7 @@ to compute a plug-in level on the package's scale when building a grid by hand.
 
 ## Selection rules
 
-`select` names the rule that picks the candidate used for estimation.
+The `select` argument specifies the selection rule.
 
 `select = "amse"`, the default, minimizes the criterion. `select = "cv"` ranks
 candidates by K-fold cross-validated prediction error of the first stage, with
@@ -463,8 +467,8 @@ directly through `foldid`, and `cv_group` keeps rows sharing a value in the same
 fold. The scores are stored in the `cvm` and `cvsd` columns of `$candidates` when
 they are computed.
 
-`select = "bcch"` takes the candidate in the reference
-dictionary whose penalty is closest on the log scale to the plug-in level, with
+`select = "bcch"` chooses the candidate in the reference dictionary whose penalty
+is closest on the log scale to the plug-in level, with
 the first-stage scale refined iteratively on the LASSO residual as in the
 original programs of Belloni et al. The `penalty = "bcch"` grid uses the
 least-squares scale, so its plug-in level can differ from the selection target.
@@ -473,9 +477,7 @@ Use the full argument name `cv_s`: R would partially match `s` to `subset`.
 The package catches values such as `s = "lambda.1se"` and reports the mistake.
 It also warns if `cv_s` is supplied when `select` is not `"cv"`.
 
-Both comparators look at the first stage alone and neither uses the outcome, so
-neither responds to the endogeneity of the regressor. Running the three rules
-over the same candidate list gives
+We compare the three selection rules using the same candidate list:
 
 ```r
 rules <- lapply(c("amse", "cv", "bcch"), function(rule)
@@ -495,18 +497,19 @@ data.frame(
 3 bcch background         3    0.0556
 ```
 
-Here AMSE selects the richest dictionary and the largest effective dimension.
-The gain in first-stage fit outweighs the estimated bias cost of the additional
-columns. CV and BCCH choose smaller first stages, though all three return
-similar schooling coefficients in this example.
+In this example, AMSE selects the expanded dictionary with effective dimension
+25, while CV and BCCH select the background dictionary with dimensions 5 and 3.
+The resulting estimates of the schooling coefficient are similar. The larger
+dimension selected by AMSE reflects the balance between approximation error and
+bias: the improvement in first-stage approximation is sufficient to offset the
+additional bias cost in the estimated criterion.
 
-A candidate is eligible when its first stage is not empty, so that it defines an
-IV estimator at all, and when `screen = TRUE` also when its denominator clears
-the screen described below. The AMSE rule and cross-validation both minimize
-over that set. The plug-in rule instead takes the nearest grid point in the
-reference dictionary whether or not it is eligible, so it can land on a
-candidate the other two exclude; estimation then falls back to the pilot and
-`summary()` reports that it did.
+A candidate is eligible if its first stage is nonzero and, when `screen = TRUE`,
+its IV denominator satisfies the threshold described below. AMSE and
+cross-validation minimize over eligible candidates. The plug-in rule chooses
+the nearest grid point in the reference dictionary without imposing eligibility.
+If that candidate cannot be used for estimation, the package uses the pilot
+and reports this in `summary()`.
 
 ### The pilot and the reference dictionary
 
@@ -521,28 +524,25 @@ a separate estimate of the first-stage error. The reported error correlation
 uses the least-squares first-stage scale, even when `sigma_v` was supplied to
 build the penalty grid.
 
-The reference dictionary is the dictionary the pilot is drawn from. It also
-supplies the default `sigma_v` behind a `"bcch"` grid, and `select = "bcch"`
-searches within it. By default it is the first dictionary in the list, and
-`pilot` may name a different one, as `pilot = "background"` does above. It should
-be a dictionary fixed before the outcome is examined. Passing an integer to
-`pilot` instead names a candidate index directly, which is useful for replication
-but bypasses the rule.
+The reference dictionary also supplies the default `sigma_v` for a `"bcch"`
+grid and the candidates considered by `select = "bcch"`. It defaults to the
+first dictionary in the list. A different dictionary can be specified by name,
+as in `pilot = "background"`, and should be fixed before examining the outcome.
+For replication, an integer value of `pilot` specifies a candidate index directly.
 
 `summary()` reports which candidate served as pilot and the moments it produced.
-The implied correlation is attenuated relative to the truth, since it
-is computed from a preliminary estimate rather than from the true coefficient;
-the paper quantifies the cost of that attenuation.
+The implied correlation is attenuated because it uses a preliminary estimate
+of the structural coefficient. The paper quantifies the effect of this
+attenuation on the criterion.
 
 ### Screening on the IV denominator
 
 `screen = TRUE` restricts selection to candidates with `abs(h) >= 1/sqrt(n)`,
 the root-`n` scale at which the IV denominator itself fluctuates. The default is
-`FALSE`, so that the full candidate list is scored. The pilot is screened in
-either case, since a pilot with a near-zero denominator would distort both error
-moments and hence every candidate's score; if nothing in the reference dictionary
-survives, the unscreened set is used and that fact is recorded in
-`$pilot$screened`.
+`FALSE`. The pilot is screened under either setting because a near-zero
+denominator would affect the estimated error moments used for all candidates.
+If no candidate in the reference dictionary satisfies the threshold, the pilot
+is chosen from the unscreened set. This is recorded in `$pilot$screened`.
 
 ## Standard errors, clustering and cross-validation groups
 
@@ -579,14 +579,13 @@ confint(m_cl)["education", ]
 0.03108792 0.07565963 
 ```
 
-The point estimate 0.05337377 is the one `m_dict` already reported, since
-clustering enters the reported variance and nothing else: the same candidate is
-selected and the same first stage is fitted. `coeftest()` takes the
-residual degrees of freedom off the fitted object and reports a t statistic,
-where `summary()` defaults to the normal.
+The point estimate remains 0.05337377 because clustering affects the reported
+variance but does not change the selected candidate or first-stage fit.
+The `coeftest()` function uses the fitted object's residual degrees of freedom
+and reports a t statistic, while `summary()` defaults to normal inference.
 
-Because `bread()` and `estfun()` methods are provided, any variance estimator in
-**sandwich** applies unchanged:
+The package provides `bread()`, `estfun()` and `vcovHC()` methods for covariance
+estimation with **sandwich**. For example, HC1 standard errors are obtained by
 
 ```r
 round(sqrt(diag(sandwich::vcovHC(m_dict, type = "HC1")))[1:2], 5)
@@ -621,23 +620,26 @@ A `vcovHC()` method is supplied because **sandwich** recovers residuals by
 dividing the estimating functions by the model matrix, and the estimating
 functions here use the projected regressors rather than the regressors
 themselves. `hatvalues()` returns the leverage from the projected regressors, so
-HC2 and HC3 work as well. Residuals are kept as `N`-vectors in the original
-observation coordinates so that robust and clustered variances are available at
-all: the homoscedastic variance is invariant to how the controls are partialled
-out, but a robust one is not.
+HC2 and HC3 are also available. Residuals are retained as `N`-vectors in the
+original observation coordinates. This matters for robust and clustered
+covariances, which can depend on how the controls are partialled out even when
+the homoscedastic covariance is unchanged.
 
 Clustering and heteroscedasticity adjustments apply to the reported standard
 errors. Selection still uses the homoscedastic criterion covered by the theory.
 
 ## The matrix interface
 
-`ivamse_fit()` takes the outcome `y`, endogenous regressor `x`, dictionaries `z` as
-one matrix or a named list of matrices, and the controls `w`. It adds an
-intercept column to the controls unless `intercept = FALSE`, and labels the
-endogenous coefficient with `x_name`. Every grid, selection, pilot and screening
-argument described above is an argument of `ivamse_fit()` and reaches it through
-the `...` of `ivamse()`. It does not parse a formula, so it returns no `terms`,
-`levels` or model frame, and `predict()` on new data is unavailable.
+The matrix interface `ivamse_fit()` accepts the outcome `y`, endogenous
+regressor `x`, controls `w`, and instruments `z`. The instruments may be supplied
+as a single matrix or a named list of dictionary matrices. An intercept is added
+to the controls unless `intercept = FALSE`, and `x_name` labels the endogenous
+coefficient.
+
+The grid, selection, pilot and screening arguments described above are accepted
+by `ivamse_fit()` and passed through `...` when using `ivamse()`. A matrix fit
+does not retain formula terms, levels or a model frame, so `predict()` is not
+available for new data.
 
 ```r
 fit <- ivamse_fit(y, x, z = list(small = z1, wide = z2), w = W, select = "amse")
@@ -706,17 +708,17 @@ Three **broom** methods are available:
 
 ## Exported building blocks
 
-Four functions from the criterion are exported for use on their own:
-`bcch_lambda()` for the plug-in penalty level, `implied_alpha()` for the largest
-score-domination constant a penalty supports, `effective_dimension()` for the
-rank of the equicorrelation set of a LASSO fit, and `feasible_criterion()` for
-the criterion itself given the pieces it is built from.
+Four functions are exported for separate use. The function `bcch_lambda()`
+computes the plug-in penalty, and `implied_alpha()` computes the largest
+score-domination constant supported by a penalty. The function
+`effective_dimension()` computes the rank of the equicorrelation set, and
+`feasible_criterion()` evaluates the AMSE score from the error moments and
+candidate quantities supplied to it.
 
 ```r
 bcch_lambda(p = 50, n = 500, sigma_v = 1)
 implied_alpha(2^seq(-4, 2, by = 0.5) * bcch_lambda(50, 500), p = 50, n = 500)
 ```
-
 
 ## References
 
