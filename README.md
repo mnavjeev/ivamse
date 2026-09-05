@@ -734,38 +734,6 @@ bcch_lambda(p = 50, n = 500, sigma_v = 1)
 implied_alpha(2^seq(-4, 2, by = 0.5) * bcch_lambda(50, 500), p = 50, n = 500)
 ```
 
-## Scope of the criterion
-
-The theory covers one endogenous regressor. A formula implying more than one is
-refused.
-
-The criterion is derived under homoscedastic Gaussian errors and is always
-evaluated in that form. Simulations with Laplace errors leave the ranking of
-candidates essentially unchanged, so departures from Gaussianity are not fatal,
-but heteroscedastic selection is covered by no result. Clustering and
-heteroscedasticity affect the reported standard errors only and never enter
-selection, so a clustered fit selects the same candidate as an unclustered one on
-the same data.
-
-Standard errors treat the selected first stage as fixed. They reflect neither
-first-stage estimation error nor the fact that the candidate was chosen on the
-same data, and they are not robust to weak identification. This is first-order
-valid, since the limiting distribution of the estimator does not involve the
-first-stage estimate.
-
-The level of the criterion is not an estimate of mean squared error. It carries
-an offset that is common to every candidate and drops out of comparisons, so
-only differences and rankings across candidates are meaningful, and a criterion
-value on its own says nothing about the precision of the estimate.
-
-## Verification
-
-The package reproduces the authors' replication code to numerical precision.
-Point the environment variable `IVAMSE_PAPER_REPO` at a checkout of the paper
-repository and the test suite compares penalties, IV denominators, fitted second
-moments, effective dimensions and criterion values candidate by candidate. The
-comparison runs on a simulated design, since the data used in the paper is not
-redistributable, and the test is skipped when the variable is unset.
 
 ## References
 
